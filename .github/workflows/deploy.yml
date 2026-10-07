@@ -1,0 +1,64 @@
+name: Deploy CDK stack
+
+on:
+  push:
+    branches: [main]      # deploy every time you push to main
+  workflow_dispatch:      # adds a "Run workflow" button on GitHub
+
+permissions:
+  id-token: write         
+  contents: read          
+
+concurrency:
+  group: deploy           
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install CDK app dependencies (root)
+        run: npm ci
+
+      - name: Install Lambda 1 dependencies (mongoose only)
+        run: npm ci --omit=dev --prefix lambda/with-mongoose
+
+      - name: Install Python Lambda dependencies (skipped if you have no Python Lambdas)
+        if: hashFiles('lambda-py/with-pymongo/requirements.txt') != ''
+        run: >
+          pip install -r lambda-py/with-pymongo/requirements.txt
+          -t lambda-py/with-pymongo
+          --platform manylinux2014_x86_64 --only-binary=:all:
+          --python-version 3.13 --implementation cp
+
+      - name: Log in to AWS
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ap-south-1
+
+      - name: Deploy with CDK
+        run: npx cdk deploy --require-approval never --outputs-file outputs.json
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+
+      - name: Smoke test - Lambda 1 must save to MongoDB
+        run: |
+          URL=$(jq -r '.CdkMongooseDemoStack.WithMongooseUrl' outputs.json)
+          curl -sf -X POST "$URL" -H "Content-Type: application/json" \
+            -d '{"name":"github-actions","email":"ci@example.com","city":"CI"}'
+
+      - name: Smoke test - Lambda 2 must fail with MODULE_NOT_FOUND
+        run: |
+          URL=$(jq -r '.CdkMongooseDemoStack.WithoutMongooseUrl' outputs.json)
+          curl -s -X POST "$URL" -H "Content-Type: application/json" \
+            -d '{"name":"github-actions","email":"ci@example.com"}' | tee response.json
+          grep -q MODULE_NOT_FOUND response.json
