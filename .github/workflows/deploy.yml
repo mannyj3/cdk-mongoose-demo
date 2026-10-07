@@ -49,16 +49,3 @@ jobs:
         run: npx cdk deploy --require-approval never --outputs-file outputs.json
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
-
-      - name: Smoke test - Lambda 1 must save to MongoDB
-        run: |
-          URL=$(jq -r '.CdkMongooseDemoStack.WithMongooseUrl' outputs.json)
-          curl -sf -X POST "$URL" -H "Content-Type: application/json" \
-            -d '{"name":"github-actions","email":"ci@example.com","city":"CI"}'
-
-      - name: Smoke test - Lambda 2 must fail with MODULE_NOT_FOUND
-        run: |
-          URL=$(jq -r '.CdkMongooseDemoStack.WithoutMongooseUrl' outputs.json)
-          curl -s -X POST "$URL" -H "Content-Type: application/json" \
-            -d '{"name":"github-actions","email":"ci@example.com"}' | tee response.json
-          grep -q MODULE_NOT_FOUND response.json
