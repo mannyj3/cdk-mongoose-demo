@@ -1,0 +1,78 @@
+name: Validate
+
+on:
+  push:
+    branches: [dev]             # runs on every push to dev
+
+permissions:
+  contents: read                # read-only; this workflow never touches AWS
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true      # a newer push to dev cancels the older, outdated run
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint (JavaScript)
+        run: npx eslint .
+
+      - name: Ruff (Python Lambdas, skipped if you have none)
+        if: hashFiles('lambda-py/**/index.py') != ''
+        run: pipx run --spec ruff==0.16.10 ruff check --select E4,E7,E9,F lambda-py/*/index.py
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code (full history)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  iac-security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install CDK app dependencies (root)
+        run: npm ci
+
+      - name: Install Lambda 1 dependencies (mongoose only)
+        run: npm ci --omit=dev --prefix lambda/with-mongoose
+
+      - name: cdk-nag security checks
+        run: npx cdk synth --quiet -c nag=true
+        env:
+          MONGODB_URI: mongodb+srv://ci:ci@example.mongodb.net/cdkDemo   # dummy value, synth only
+
+  workflow-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: actionlint (checks every workflow file)
+        run: pipx run --spec actionlint-py==1.7.12.25 actionlint
