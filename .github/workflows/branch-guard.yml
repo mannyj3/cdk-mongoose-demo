@@ -2,11 +2,12 @@ name: Branch guard
 
 on:
   pull_request:
-    branches: [dev]
+    branches: [dev, main]
     types: [opened, synchronize, reopened, edited]
 
 jobs:
   only-features-into-dev:
+    if: github.base_ref == 'dev'
     runs-on: ubuntu-latest
     steps:
       - name: Allow only features -> dev
@@ -19,3 +20,18 @@ jobs:
             exit 1
           fi
           echo "OK: features -> dev is allowed"
+
+  only-dev-into-main:
+    if: github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Allow only dev -> main
+        env:
+          SOURCE: ${{ github.head_ref }}
+        run: |
+          echo "Pull request: $SOURCE -> main"
+          if [ "$SOURCE" != "dev" ]; then
+            echo "::error::Only the 'dev' branch can be merged into main. This pull request comes from '$SOURCE'."
+            exit 1
+          fi
+          echo "OK: dev -> main is allowed"
